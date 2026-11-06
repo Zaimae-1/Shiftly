@@ -1,0 +1,26 @@
+<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Uji model wajah HADIR</title>
+<style>body{font:16px/1.6 system-ui;background:#e9e8e3;color:#263532;padding:24px}main{max-width:700px;margin:auto;background:#f6f5f1;padding:24px;border-radius:24px}label{display:block;margin:18px 0}input{display:block;max-width:100%}button{padding:12px 20px;border:0;border-radius:12px;background:#476c68;color:white;font:inherit}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#e1e8de;padding:16px;border-radius:12px}</style>
+<main><h1>Uji model wajah lokal</h1><p>Bandingkan dua foto. Foto hanya diproses di tab ini, tidak disimpan sebagai siswa dan tidak diunggah.</p>
+<label>Foto pertama<input id="first" type="file" accept="image/*"></label><label>Foto kedua<input id="second" type="file" accept="image/*"></label>
+<button id="run">Bandingkan foto</button><pre id="output" role="status">Belum diuji.</pre></main>
+<script src="face_bridge.js"></script><script>
+const button=document.getElementById('run');
+const output=document.getElementById('output');
+const toBase64=file=>new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(file)});
+button.onclick=async()=>{
+  const first=document.getElementById('first').files[0],second=document.getElementById('second').files[0];
+  if(!first||!second){output.textContent='Pilih dua gambar terlebih dahulu.';return}
+  button.disabled=true;output.textContent='Memuat model lokal…';
+  try{
+    await HadirFaces.prepare();output.textContent='Model siap. Menganalisis dua foto…';
+    const a=JSON.parse(await HadirFaces.extract(await toBase64(first)));
+    const b=JSON.parse(await HadirFaces.extract(await toBase64(second)));
+    output.textContent=`Foto pertama: ${a.status}\nFoto kedua: ${b.status}`;
+    if(a.status==='face'&&b.status==='face'){
+      const distance=Math.sqrt(a.descriptor.reduce((sum,v,i)=>sum+(v-b.descriptor[i])**2,0));
+      output.textContent+=`\nPanjang descriptor: ${a.descriptor.length}, ${b.descriptor.length}\nJarak: ${distance.toFixed(4)}\nHasil: ${distance<=.48?'cocok':'tidak cocok'}`;
+    }
+  }catch(e){output.textContent='GAGAL: '+e.message}finally{button.disabled=false}
+};
+</script></html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="id">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnosis kamera HADIR</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;background:#e9e8e3;color:#263532;margin:0;padding:24px}
+main{max-width:760px;margin:24px auto;background:#f6f5f1;padding:28px;border:1px solid #d8dcd5;border-radius:24px}
+h1{font-size:26px;line-height:1.3}p{color:#697771}button{font:inherit;border:0;border-radius:12px;background:#476c68;color:white;padding:12px 18px;cursor:pointer;margin:4px}button:disabled{opacity:.5;cursor:wait}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#e8ece5;padding:16px;border-radius:14px;font:14px/1.7 monospace}
+video{display:block;width:100%;max-height:320px;background:#263532;border-radius:16px;margin-top:20px}a{color:#476c68}
+</style>
+<main>
+<h1>Diagnosis kamera</h1>
+<p>Tes ini membandingkan kamera default dengan setiap kamera yang terdaftar di Chrome, termasuk kamera virtual. Tutup aplikasi/tab kamera lain sebelum memulai.</p>
+<p>Tidak mengambil foto, merekam video, atau mengirim data. Kamera akan dilepas setelah pengujian atau ketika halaman disembunyikan.</p>
+<button id="start">Mulai diagnosis</button><button id="stop" disabled>Hentikan</button>
+<video id="preview" autoplay muted playsinline aria-label="Preview kamera yang diuji"></video>
+<pre id="result" role="status" aria-live="polite">Belum diuji.</pre>
+<a href="/">Kembali ke aplikasi</a>
+</main>
+<script>
+'use strict';
+const start = document.getElementById('start');
+const stop = document.getElementById('stop');
+const result = document.getElementById('result');
+const preview = document.getElementById('preview');
+let token = 0;
+const streams = new Set();
+function log(message) { result.textContent += message + '\n'; }
+function release(stream) { stream.getTracks().forEach(t => t.stop()); streams.delete(stream); if (preview.srcObject === stream) preview.srcObject = null; }
+function cancel() { token++; streams.forEach(release); start.disabled = false; stop.disabled = true; }
+async function open(video, run) {
+  let expired = false;
+  let timer;
+  const pending = navigator.mediaDevices.getUserMedia({video, audio:false}).then(stream => {
+    if (expired || run !== token) { release(stream); throw new Error('Pengujian dihentikan.'); }
+    streams.add(stream);
+    return stream;
+  });
+  try {
+    return await Promise.race([pending, new Promise((_, reject) => {
+      timer = setTimeout(() => { expired = true; reject(new Error('Kamera tidak merespons dalam 8 detik.')); }, 8000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+start.addEventListener('click', async () => {
+  cancel();
+  const run = token;
+  start.disabled = true;
+  stop.disabled = false;
+  result.textContent = '';
+  log('Konteks aman: ' + window.isSecureContext);
+  let defaultWorks = false;
+  const failed = [];
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('API kamera tidak tersedia di konteks ini.');
+    log('1. Membuka kamera default (video:true)…');
+    try {
+      const stream = await open(true, run);
+      if (run !== token) return;
+      defaultWorks = true;
+      log('BERHASIL: ' + (stream.getVideoTracks()[0]?.label || 'kamera default'));
+      preview.srcObject = stream;
+      await preview.play().catch(() => {});
+      await pause(1000);
+      release(stream);
+    } catch (error) { if (run !== token) return; log('GAGAL default: ' + error.name + ' — ' + error.message); }
+    if (run !== token) return;
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput' && d.deviceId);
+    log('\n2. Kamera yang terdaftar: ' + devices.length);
+    for (const device of devices) {
+      if (run !== token) return;
+      await pause(500);
+      if (run !== token) return;
+      const label = device.label || 'Kamera tanpa nama';
+      log('Menguji: ' + label);
+      try {
+        const stream = await open({deviceId:{exact:device.deviceId}}, run);
+        if (run !== token) return;
+        log('BERHASIL: ' + label);
+        preview.srcObject = stream;
+        await preview.play().catch(() => {});
+        await pause(500);
+        release(stream);
+      } catch (error) {
+        if (run !== token) return;
+        failed.push(label);
+        log('GAGAL: ' + label + ' — ' + error.name + ': ' + error.message);
+      }
+    }
+    if (run !== token) return;
+    log('\nHASIL: ' + (defaultWorks && failed.length
+      ? 'Kamera default berfungsi, tetapi perangkat berikut gagal: ' + failed.join(', ') + '. Cocok dengan kegagalan enumerasi kamera pada plugin Flutter.'
+      : defaultWorks ? 'Kamera dasar berfungsi. Tidak ada perangkat yang gagal pada tes ini; lanjut periksa pembukaan ulang/preview Flutter.'
+      : 'Kamera default gagal di API browser juga; kegagalan tidak terbatas pada UI Flutter.'));
+  } catch (error) { if (run === token) log('ERROR: ' + error.name + ' — ' + error.message); }
+  finally { if (run === token) cancel(); }
+});
+stop.addEventListener('click', () => { cancel(); log('\nPengujian dihentikan.'); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && start.disabled) { cancel(); log('\nPengujian dihentikan karena halaman disembunyikan.'); } });
+window.addEventListener('pagehide', cancel);
+</script>
+</html>
